@@ -1,0 +1,29 @@
+{
+  "name": "osgf-extractor",
+  "version": "1.0.0",
+  "description": "OAGF FAAC report crawler and extractor pipeline",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit --pretty false",
+    "test": "npm run build && node --test tests",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.13.10",
+    "@types/pdf-parse": "^1.1.5",
+    "typescript": "^5.5.3"
+  },
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.994.0",
+    "@types/amqplib": "^0.10.8",
+    "amqplib": "^0.10.9",
+    "better-sqlite3": "^12.6.2",
+    "cheerio": "^1.2.0",
+    "pdf-parse": "^2.4.5",
+    "undici": "^7.22.0"
+  }
+}
