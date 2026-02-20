@@ -18,7 +18,7 @@ const DEFAULT_CONFIG: AppConfig = {
   maxPages: 200,
   maxDownloadAttempts: 3,
   maxExtractAttempts: 3,
-  asyncQueueMode: "local_sqlite",
+  asyncQueueMode: "http",
   asyncQueuePath: "data/async-queue.sqlite",
   asyncQueueHttpBaseUrl: "http://127.0.0.1:8081",
   asyncQueueHttpToken: undefined,

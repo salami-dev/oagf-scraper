@@ -63,6 +63,53 @@ npm run start -- poll --iterations 1 --max-docs 25
 npm run start -- status
 ```
 
+## Fresh Machine / Deploy Commands
+
+Windows PowerShell:
+
+```powershell
+git clone <repo-url>
+cd osgf-extractor
+
+npm ci
+npm run build
+
+python -m pip install -r services/table-service/requirements.txt
+```
+
+Set runtime environment:
+
+```powershell
+$env:SINK_TYPE="local_jsonl"
+$env:ASYNC_QUEUE_MODE="http"
+$env:ASYNC_QUEUE_HTTP_BASE_URL="http://127.0.0.1:8081"
+$env:IGNORE_HTTPS_ERRORS="true"
+```
+
+Run supervised async pipeline (auto-starts table service if needed):
+
+```powershell
+npm run start -- run-async-supervised --max-docs 50 --ignore-https-errors
+```
+
+Check status:
+
+```powershell
+npm run start -- status
+```
+
+Split-service mode (run table service separately):
+
+1. Start service:
+```powershell
+python -m uvicorn app:app --app-dir services/table-service --host 0.0.0.0 --port 8081
+```
+
+2. Run async pipeline:
+```powershell
+npm run start -- run-async --max-docs 50 --ignore-https-errors
+```
+
 ## Commands
 
 - `crawl [--dry-run] [--ignore-https-errors] [--config <path>]`
@@ -95,7 +142,7 @@ Default config values come from `src/config/loadConfig.ts` and can be overridden
 - `maxPages` (`MAX_PAGES`)
 - `maxDownloadAttempts` (`MAX_DOWNLOAD_ATTEMPTS`)
 - `maxExtractAttempts` (`MAX_EXTRACT_ATTEMPTS`)
-- `asyncQueueMode` (`ASYNC_QUEUE_MODE`: `local_sqlite|http`)
+- `asyncQueueMode` (`ASYNC_QUEUE_MODE`: `local_sqlite|http`) default `http`
 - `storePath` (`STORE_PATH`): default `data/state.sqlite`
 - `asyncQueuePath` (`ASYNC_QUEUE_PATH`): default `data/async-queue.sqlite` (used when `asyncQueueMode=local_sqlite`)
 - `asyncQueueHttpBaseUrl` (`ASYNC_QUEUE_HTTP_BASE_URL`): default `http://127.0.0.1:8081` (used when `asyncQueueMode=http`)
