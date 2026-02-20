@@ -183,6 +183,41 @@ test("sqlite store revalidation and missing-file reconciliation", async () => {
   await store.close();
 });
 
+test("sqlite store extract job lifecycle supports enqueue claim complete", async () => {
+  const { SqliteStore } = await import(pathToFileUrl(path.join(process.cwd(), "dist", "store", "sqliteStore.js")));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "osgf-store-"));
+  const dbPath = path.join(tempDir, "state.sqlite");
+  const store = new SqliteStore(dbPath);
+
+  await store.enqueueExtractJob({
+    jobId: "job-1",
+    runId: "run-1",
+    docId: "doc-1",
+    rawPdfPath: "data/raw/doc-1.pdf",
+    fileSha256: "abc",
+    attempt: 1,
+    submittedAt: "2026-02-20T00:00:00.000Z",
+  });
+
+  const claimed = await store.claimPendingExtractJobs(10, "2099-02-20T01:00:00.000Z");
+  assert.equal(claimed.length, 1);
+  assert.equal(claimed[0].jobId, "job-1");
+
+  const claimedAgain = await store.claimPendingExtractJobs(10, "2099-02-20T01:00:00.000Z");
+  assert.equal(claimedAgain.length, 0);
+
+  await store.completeExtractJob({
+    jobId: "job-1",
+    status: "completed",
+    finishedAt: "2026-02-20T02:00:00.000Z",
+    resultRef: "data/extracted/doc-1.tables.json",
+  });
+
+  const claimedAfterComplete = await store.claimPendingExtractJobs(10, "2026-02-20T03:00:00.000Z");
+  assert.equal(claimedAfterComplete.length, 0);
+  await store.close();
+});
+
 function pathToFileUrl(filePath) {
   const normalized = filePath.replace(/\\/g, "/");
   return `file:///${normalized}`;

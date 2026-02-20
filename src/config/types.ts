@@ -11,7 +11,7 @@ export interface AppConfig {
   pollIntervalMinutes: number;
   verifyDownloadedFilesOnStartup: boolean;
   revalidateAfterDays: number;
-  changeDetectionMode: "none" | "head";
+  changeDetectionMode: "none" | "head" | "conditional_get";
   requestTimeoutMs: number;
   downloadTimeoutMs: number;
   crawlConcurrency: number;
@@ -20,6 +20,12 @@ export interface AppConfig {
   maxPages: number;
   maxDownloadAttempts: number;
   maxExtractAttempts: number;
+  asyncQueueMode: "local_sqlite" | "http";
+  asyncQueuePath: string;
+  asyncQueueHttpBaseUrl: string;
+  asyncQueueHttpToken?: string;
+  asyncQueueHttpTimeoutMs: number;
+  extractJobLeaseMinutes: number;
   outputDirs: OutputDirs;
   storePath: string;
 }

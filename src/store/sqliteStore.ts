@@ -2,7 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { DownloadResult, DocumentDiscoveredItem, ExtractionResult } from "../types";
-import { DownloadWorkItem, ExtractWorkItem, PipelineStore, RawFileItem, RevalidationItem, StoreStats } from "./types";
+import {
+  ClaimedExtractJob,
+  DownloadWorkItem,
+  ExtractJobRecord,
+  ExtractJobStatusRecord,
+  ExtractWorkItem,
+  PipelineStore,
+  RawFileItem,
+  RevalidationItem,
+  StoreStats,
+} from "./types";
 
 type DocumentRow = {
   docId: string;
@@ -29,6 +39,21 @@ type RevalidationRow = {
 type RawFileRow = {
   docId: string;
   rawLocation: string;
+};
+
+type ExtractJobRow = {
+  jobId: string;
+  runId: string;
+  docId: string;
+  rawPdfPath: string;
+  fileSha256: string | null;
+  attempt: number;
+  submittedAt: string;
+  leaseUntil: string;
+  status?: "queued" | "leased" | "completed" | "failed";
+  finishedAt?: string | null;
+  error?: string | null;
+  resultRef?: string | null;
 };
 
 export class SqliteStore implements PipelineStore {
@@ -271,6 +296,133 @@ export class SqliteStore implements PipelineStore {
       });
   }
 
+  async enqueueExtractJob(job: ExtractJobRecord): Promise<void> {
+    this.db
+      .prepare(
+        `
+        INSERT INTO extract_jobs (
+          jobId, runId, docId, rawPdfPath, fileSha256, attempt, submittedAt, status, leaseUntil
+        )
+        VALUES (
+          @jobId, @runId, @docId, @rawPdfPath, @fileSha256, @attempt, @submittedAt, 'queued', NULL
+        )
+        ON CONFLICT(jobId) DO NOTHING
+      `,
+      )
+      .run({
+        jobId: job.jobId,
+        runId: job.runId,
+        docId: job.docId,
+        rawPdfPath: job.rawPdfPath,
+        fileSha256: job.fileSha256 ?? null,
+        attempt: job.attempt,
+        submittedAt: job.submittedAt,
+      });
+  }
+
+  async claimPendingExtractJobs(limit: number, leaseUntil: string): Promise<ClaimedExtractJob[]> {
+    const rows = this.db
+      .prepare(
+        `
+        SELECT jobId, runId, docId, rawPdfPath, fileSha256, attempt, submittedAt
+        FROM extract_jobs
+        WHERE status = 'queued'
+          OR (status = 'leased' AND leaseUntil IS NOT NULL AND leaseUntil < @now)
+        ORDER BY submittedAt ASC
+        LIMIT @limit
+      `,
+      )
+      .all({ limit, now: new Date().toISOString() }) as Array<Omit<ExtractJobRow, "leaseUntil">>;
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const updateStmt = this.db.prepare(
+      `
+      UPDATE extract_jobs
+      SET status = 'leased', leaseUntil = @leaseUntil
+      WHERE jobId = @jobId
+    `,
+    );
+    const tx = this.db.transaction((jobRows: Array<Omit<ExtractJobRow, "leaseUntil">>) => {
+      for (const row of jobRows) {
+        updateStmt.run({ jobId: row.jobId, leaseUntil });
+      }
+    });
+    tx(rows);
+
+    return rows.map((row) => ({
+      jobId: row.jobId,
+      runId: row.runId,
+      docId: row.docId,
+      rawPdfPath: row.rawPdfPath,
+      fileSha256: row.fileSha256 ?? undefined,
+      attempt: row.attempt,
+      submittedAt: row.submittedAt,
+      leaseUntil,
+    }));
+  }
+
+  async getExtractJob(jobId: string): Promise<ExtractJobStatusRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `
+        SELECT jobId, runId, docId, rawPdfPath, fileSha256, attempt, submittedAt, status, leaseUntil, finishedAt, error, resultRef
+        FROM extract_jobs
+        WHERE jobId = ?
+      `,
+      )
+      .get(jobId) as ExtractJobRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      jobId: row.jobId,
+      runId: row.runId,
+      docId: row.docId,
+      rawPdfPath: row.rawPdfPath,
+      fileSha256: row.fileSha256 ?? undefined,
+      attempt: row.attempt,
+      submittedAt: row.submittedAt,
+      status: row.status as ExtractJobStatusRecord["status"],
+      leaseUntil: row.leaseUntil ?? undefined,
+      finishedAt: row.finishedAt ?? undefined,
+      error: row.error ?? undefined,
+      resultRef: row.resultRef ?? undefined,
+    };
+  }
+
+  async completeExtractJob(result: {
+    jobId: string;
+    status: "completed" | "failed";
+    finishedAt: string;
+    error?: string;
+    resultRef?: string;
+  }): Promise<void> {
+    this.db
+      .prepare(
+        `
+        UPDATE extract_jobs
+        SET
+          status = @status,
+          finishedAt = @finishedAt,
+          error = @error,
+          resultRef = @resultRef
+        WHERE jobId = @jobId
+      `,
+      )
+      .run({
+        jobId: result.jobId,
+        status: result.status,
+        finishedAt: result.finishedAt,
+        error: result.error ?? null,
+        resultRef: result.resultRef ?? null,
+      });
+  }
+
   async markDownloadResult(result: DownloadResult): Promise<void> {
     const statement = this.db.prepare(`
       UPDATE documents
@@ -447,8 +599,25 @@ export class SqliteStore implements PipelineStore {
         status TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS extract_jobs (
+        jobId TEXT PRIMARY KEY,
+        runId TEXT NOT NULL,
+        docId TEXT NOT NULL,
+        rawPdfPath TEXT NOT NULL,
+        fileSha256 TEXT NULL,
+        attempt INTEGER NOT NULL,
+        submittedAt TEXT NOT NULL,
+        status TEXT NOT NULL,
+        leaseUntil TEXT NULL,
+        finishedAt TEXT NULL,
+        error TEXT NULL,
+        resultRef TEXT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(lastStatus);
       CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updatedAt);
+      CREATE INDEX IF NOT EXISTS idx_extract_jobs_status ON extract_jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_extract_jobs_doc ON extract_jobs(docId);
     `);
 
     this.ensureColumn("documents", "etag", "TEXT NULL");

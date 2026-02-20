@@ -39,9 +39,11 @@ scripts/
 1. `crawl`: fetches listing HTML pages, discovers PDF URLs, resolves pagination, emits discovered work-items.
 2. `download`: pulls pending docs from SQLite, downloads with retries/backoff and atomic file writes, records hash/size/content type.
 3. `extract`: pulls downloaded docs, extracts text and page count, writes extracted output, records result.
-4. `run`: orchestrates `crawl -> download -> extract` under a tracked `runId`.
-5. `poll`: repeats pipeline execution on an interval for periodic ingestion.
-6. `status`: prints aggregate document state from SQLite.
+4. `extract-submit`: async mode producer that enqueues extraction jobs to queue adapter (SQLite or HTTP service).
+5. `extract-collect`: async mode consumer that ingests completed extraction results back into SQLite store.
+6. `run`: orchestrates `crawl -> download -> extract` under a tracked `runId`.
+7. `poll`: repeats pipeline execution on an interval for periodic ingestion.
+8. `status`: prints aggregate document state from SQLite.
 
 ## Run Locally
 
@@ -52,7 +54,11 @@ npm run start -- crawl --dry-run
 npm run start -- crawl
 npm run start -- download
 npm run start -- extract
+npm run start -- extract-submit --max-docs 25
+npm run start -- extract-collect --max-docs 25
 npm run start -- run --max-docs 25
+npm run start -- run-async --max-docs 25 --ignore-https-errors
+npm run start -- run-async-supervised --max-docs 25 --ignore-https-errors
 npm run start -- poll --iterations 1 --max-docs 25
 npm run start -- status
 ```
@@ -62,7 +68,11 @@ npm run start -- status
 - `crawl [--dry-run] [--ignore-https-errors] [--config <path>]`
 - `download [--force] [--ignore-https-errors] [--config <path>]`
 - `extract [--force] [--config <path>]`
+- `extract-submit [--force] [--max-docs <n>] [--config <path>]`
+- `extract-collect [--max-docs <n>] [--config <path>]`
 - `run [--max-docs <n>] [--ignore-https-errors] [--config <path>]`
+- `run-async [--max-docs <n>] [--ignore-https-errors] [--config <path>]`
+- `run-async-supervised [--max-docs <n>] [--ignore-https-errors] [--config <path>]`
 - `poll [--iterations <n>] [--interval-minutes <n>] [--max-docs <n>] [--ignore-https-errors] [--config <path>]`
 - `status [--config <path>]`
 
@@ -78,14 +88,19 @@ Default config values come from `src/config/loadConfig.ts` and can be overridden
 - `pollIntervalMinutes` (`POLL_INTERVAL_MINUTES`)
 - `verifyDownloadedFilesOnStartup` (`VERIFY_DOWNLOADED_FILES_ON_STARTUP`)
 - `revalidateAfterDays` (`REVALIDATE_AFTER_DAYS`)
-- `changeDetectionMode` (`CHANGE_DETECTION_MODE`: `none|head`)
+- `changeDetectionMode` (`CHANGE_DETECTION_MODE`: `none|head|conditional_get`)
 - `crawlConcurrency` (`CRAWL_CONCURRENCY`)
 - `downloadConcurrency` (`DOWNLOAD_CONCURRENCY`)
 - `extractConcurrency` (`EXTRACT_CONCURRENCY`)
 - `maxPages` (`MAX_PAGES`)
 - `maxDownloadAttempts` (`MAX_DOWNLOAD_ATTEMPTS`)
 - `maxExtractAttempts` (`MAX_EXTRACT_ATTEMPTS`)
+- `asyncQueueMode` (`ASYNC_QUEUE_MODE`: `local_sqlite|http`)
 - `storePath` (`STORE_PATH`): default `data/state.sqlite`
+- `asyncQueuePath` (`ASYNC_QUEUE_PATH`): default `data/async-queue.sqlite` (used when `asyncQueueMode=local_sqlite`)
+- `asyncQueueHttpBaseUrl` (`ASYNC_QUEUE_HTTP_BASE_URL`): default `http://127.0.0.1:8081` (used when `asyncQueueMode=http`)
+- `asyncQueueHttpToken` (`ASYNC_QUEUE_HTTP_TOKEN`) optional bearer token for HTTP queue service
+- `asyncQueueHttpTimeoutMs` (`ASYNC_QUEUE_HTTP_TIMEOUT_MS`)
 - `outputDirs.raw` (`OUTPUT_RAW_DIR`): default `data/raw`
 - `outputDirs.extracted` (`OUTPUT_EXTRACTED_DIR`): default `data/extracted`
 - `outputDirs.manifests` (`OUTPUT_MANIFESTS_DIR`): default `data/manifests`
@@ -104,6 +119,65 @@ Set `SINK_TYPE`:
 - `grpc` (stub): needs `GRPC_SINK_TARGET`
 
 SQS, RabbitMQ, and HTTP adapters are implemented; gRPC remains a stub.
+
+## Async Table Service (HTTP Mode)
+
+Use this when table extraction is delegated to Python sidecar workers.
+
+1. Install service dependencies:
+
+```bash
+python -m venv .venv
+.venv\\Scripts\\activate
+pip install -r services/table-service/requirements.txt
+```
+
+2. Start service:
+
+```bash
+uvicorn app:app --app-dir services/table-service --host 127.0.0.1 --port 8081
+```
+
+3. Configure Node pipeline:
+
+```bash
+set SINK_TYPE=local_jsonl
+set ASYNC_QUEUE_MODE=http
+set ASYNC_QUEUE_HTTP_BASE_URL=http://127.0.0.1:8081
+set IGNORE_HTTPS_ERRORS=true
+```
+
+4. Submit + collect asynchronously:
+
+```bash
+npm run start -- extract-submit --max-docs 100
+npm run start -- extract-collect --max-docs 100
+npm run start -- run-async-supervised --max-docs 100 --ignore-https-errors
+```
+
+Service endpoints:
+- `GET /health`
+- `POST /v1/queue/requests`
+- `POST /v1/queue/requests/lease`
+- `POST /v1/queue/requests/ack`
+- `POST /v1/queue/results`
+- `POST /v1/queue/results/lease`
+- `POST /v1/queue/results/ack`
+
+Service env vars:
+- `ASYNC_QUEUE_PATH` SQLite queue file path
+- `OUTPUT_EXTRACTED_DIR` directory for `*.tables.json`
+- `TABLE_SERVICE_TOKEN` optional bearer token for API auth
+- `TABLE_SERVICE_ENABLE_WORKER` enable built-in background worker (`1`/`0`)
+- `TABLE_WORKER_CONCURRENCY` max parallel PDF table jobs
+- `TABLE_WORKER_MAX_BATCH` lease batch size
+- `TABLE_WORKER_POLL_INTERVAL_MS` polling delay for worker loop
+- `TABLE_WORKER_LEASE_SECONDS` lease duration before job can be reclaimed
+- `TABLE_WORKER_ENABLE_OCR_FALLBACK` optional experimental fallback mode marker (`1`/`0`)
+- `ASYNC_COLLECT_MAX_IDLE_ROUNDS` max empty collect polls before `run-async` exits (default `120`)
+- `ASYNC_COLLECT_POLL_INTERVAL_MS` interval between async collect polls (default `1000`)
+
+When `--max-docs` is used with `run-async`, crawling will stop once enough documents are discovered for that run.
 
 ## Observability
 

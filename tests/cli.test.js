@@ -11,6 +11,10 @@ test("cli help renders expected commands", () => {
   assert.match(result.stdout, /crawl --dry-run/);
   assert.match(result.stdout, /download/);
   assert.match(result.stdout, /extract/);
+  assert.match(result.stdout, /extract-submit/);
+  assert.match(result.stdout, /extract-collect/);
+  assert.match(result.stdout, /run-async/);
+  assert.match(result.stdout, /run-async-supervised/);
   assert.match(result.stdout, /run/);
   assert.match(result.stdout, /poll/);
   assert.match(result.stdout, /status/);
@@ -32,6 +36,18 @@ test("cli parser wires crawl dry-run and run max-docs", async () => {
   assert.equal(pollParsed.command, "poll");
   assert.equal(pollParsed.iterations, 3);
   assert.equal(pollParsed.intervalMinutes, 10);
+
+  const submitParsed = parseCliArgs(["extract-submit", "--max-docs", "7"]);
+  assert.equal(submitParsed.command, "extract-submit");
+  assert.equal(submitParsed.maxDocs, 7);
+
+  const runAsyncParsed = parseCliArgs(["run-async", "--max-docs", "9"]);
+  assert.equal(runAsyncParsed.command, "run-async");
+  assert.equal(runAsyncParsed.maxDocs, 9);
+
+  const supervisedParsed = parseCliArgs(["run-async-supervised", "--max-docs", "11"]);
+  assert.equal(supervisedParsed.command, "run-async-supervised");
+  assert.equal(supervisedParsed.maxDocs, 11);
 });
 
 function pathToFileUrl(filePath) {

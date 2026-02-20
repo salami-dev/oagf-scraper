@@ -1,10 +1,31 @@
 import { loadConfig } from "../config";
-import { runCrawl, runDownload, runExtract, runPipeline, runPoll, runStatus } from "../core/commands";
+import {
+  runAsyncPipeline,
+  runAsyncPipelineSupervised,
+  runCrawl,
+  runDownload,
+  runExtract,
+  runExtractCollect,
+  runExtractSubmit,
+  runPipeline,
+  runPoll,
+  runStatus,
+} from "../core/commands";
 import { createRunId, Logger, MetricsRegistry } from "../observability";
 import { createSink } from "../sink";
 import { createStore } from "../store";
 
-export type CommandName = "crawl" | "download" | "extract" | "run" | "poll" | "status";
+export type CommandName =
+  | "crawl"
+  | "download"
+  | "extract"
+  | "extract-submit"
+  | "extract-collect"
+  | "run"
+  | "run-async"
+  | "run-async-supervised"
+  | "poll"
+  | "status";
 
 export interface ParsedCliArgs {
   command: CommandName;
@@ -25,7 +46,11 @@ Commands:
   crawl --dry-run
   download
   extract
+  extract-submit
+  extract-collect
   run
+  run-async
+  run-async-supervised
   poll
   status
 
@@ -34,7 +59,7 @@ Options:
   --dry-run        Dry-run mode (supported by crawl currently)
   --force          Force rerun for download/extract stages
   --ignore-https-errors  Ignore TLS certificate errors (use only when required)
-  --max-docs <n>   Limit docs processed in run command
+  --max-docs <n>   Limit docs processed in run/run-async/run-async-supervised/poll/extract-submit/extract-collect
   --iterations <n> Limit polling iterations (poll command)
   --interval-minutes <n> Override poll interval minutes
   -h, --help       Show this help
@@ -45,7 +70,18 @@ function parseCommand(raw: string | undefined): CommandName | undefined {
     return undefined;
   }
 
-  if (raw === "crawl" || raw === "download" || raw === "extract" || raw === "run" || raw === "poll" || raw === "status") {
+  if (
+    raw === "crawl" ||
+    raw === "download" ||
+    raw === "extract" ||
+    raw === "extract-submit" ||
+    raw === "extract-collect" ||
+    raw === "run" ||
+    raw === "run-async" ||
+    raw === "run-async-supervised" ||
+    raw === "poll" ||
+    raw === "status"
+  ) {
     return raw;
   }
 
@@ -133,7 +169,7 @@ export async function runCli(argv: string[]): Promise<number> {
   try {
     switch (parsed.command) {
       case "crawl":
-        await runCrawl({ ...context, logger: logger.child("crawl") }, parsed.dryRun);
+        await runCrawl({ ...context, logger: logger.child("crawl") }, parsed.dryRun, parsed.maxDocs);
         break;
       case "download":
         await runDownload({ ...context, logger: logger.child("download") }, parsed.force);
@@ -141,8 +177,20 @@ export async function runCli(argv: string[]): Promise<number> {
       case "extract":
         await runExtract({ ...context, logger: logger.child("extract") }, parsed.force);
         break;
+      case "extract-submit":
+        await runExtractSubmit({ ...context, logger: logger.child("extract_submit") }, parsed.force, parsed.maxDocs);
+        break;
+      case "extract-collect":
+        await runExtractCollect({ ...context, logger: logger.child("extract_collect") }, parsed.maxDocs);
+        break;
       case "run":
         await runPipeline({ ...context, logger: logger.child("pipeline") }, parsed.maxDocs);
+        break;
+      case "run-async":
+        await runAsyncPipeline({ ...context, logger: logger.child("pipeline_async") }, parsed.maxDocs);
+        break;
+      case "run-async-supervised":
+        await runAsyncPipelineSupervised({ ...context, logger: logger.child("pipeline_async_supervised") }, parsed.maxDocs);
         break;
       case "poll":
         await runPoll({ ...context, logger: logger.child("poll") }, parsed.maxDocs, parsed.iterations);

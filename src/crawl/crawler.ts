@@ -17,6 +17,7 @@ interface CrawlDependencies {
 
 interface CrawlOptions {
   dryRun: boolean;
+  maxDocs?: number;
 }
 
 function createDocId(url: string): string {
@@ -101,6 +102,11 @@ export async function crawlFaacPages(deps: CrawlDependencies, options: CrawlOpti
   let discoveredCount = 0;
 
   while (pageUrl && pageIndex <= config.maxPages) {
+    const remainingBeforePage = options.maxDocs !== undefined ? Math.max(options.maxDocs - discoveredCount, 0) : undefined;
+    if (remainingBeforePage === 0) {
+      break;
+    }
+
     logger.info("crawl_page_start", { pageUrl, attempt: pageIndex });
     const stopTimer = metrics.startTimer("page_fetch_ms");
 
@@ -139,6 +145,11 @@ export async function crawlFaacPages(deps: CrawlDependencies, options: CrawlOpti
     }
 
     if (discoveredItems.length > 0) {
+      const remaining = options.maxDocs !== undefined ? Math.max(options.maxDocs - discoveredCount, 0) : discoveredItems.length;
+      if (options.maxDocs !== undefined && discoveredItems.length > remaining) {
+        discoveredItems = discoveredItems.slice(0, remaining);
+      }
+
       metrics.incrementCounter("docs_discovered", discoveredItems.length);
       metrics.incrementCounter("docs_enqueued", discoveredItems.length);
       discoveredCount += discoveredItems.length;

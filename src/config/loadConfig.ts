@@ -18,6 +18,12 @@ const DEFAULT_CONFIG: AppConfig = {
   maxPages: 200,
   maxDownloadAttempts: 3,
   maxExtractAttempts: 3,
+  asyncQueueMode: "local_sqlite",
+  asyncQueuePath: "data/async-queue.sqlite",
+  asyncQueueHttpBaseUrl: "http://127.0.0.1:8081",
+  asyncQueueHttpToken: undefined,
+  asyncQueueHttpTimeoutMs: 15_000,
+  extractJobLeaseMinutes: 10,
   outputDirs: {
     raw: "data/raw",
     extracted: "data/extracted",
@@ -88,7 +94,9 @@ export function loadConfig(configPath?: string): AppConfig {
     ),
     revalidateAfterDays: toInt(process.env.REVALIDATE_AFTER_DAYS, merged.revalidateAfterDays),
     changeDetectionMode:
-      process.env.CHANGE_DETECTION_MODE === "none" || process.env.CHANGE_DETECTION_MODE === "head"
+      process.env.CHANGE_DETECTION_MODE === "none" ||
+      process.env.CHANGE_DETECTION_MODE === "head" ||
+      process.env.CHANGE_DETECTION_MODE === "conditional_get"
         ? process.env.CHANGE_DETECTION_MODE
         : merged.changeDetectionMode,
     requestTimeoutMs: toInt(process.env.REQUEST_TIMEOUT_MS, merged.requestTimeoutMs),
@@ -99,6 +107,15 @@ export function loadConfig(configPath?: string): AppConfig {
     maxPages: toInt(process.env.MAX_PAGES, merged.maxPages),
     maxDownloadAttempts: toInt(process.env.MAX_DOWNLOAD_ATTEMPTS, merged.maxDownloadAttempts),
     maxExtractAttempts: toInt(process.env.MAX_EXTRACT_ATTEMPTS, merged.maxExtractAttempts),
+    asyncQueueMode:
+      process.env.ASYNC_QUEUE_MODE === "local_sqlite" || process.env.ASYNC_QUEUE_MODE === "http"
+        ? process.env.ASYNC_QUEUE_MODE
+        : merged.asyncQueueMode,
+    asyncQueuePath: process.env.ASYNC_QUEUE_PATH ?? merged.asyncQueuePath,
+    asyncQueueHttpBaseUrl: process.env.ASYNC_QUEUE_HTTP_BASE_URL ?? merged.asyncQueueHttpBaseUrl,
+    asyncQueueHttpToken: process.env.ASYNC_QUEUE_HTTP_TOKEN ?? merged.asyncQueueHttpToken,
+    asyncQueueHttpTimeoutMs: toInt(process.env.ASYNC_QUEUE_HTTP_TIMEOUT_MS, merged.asyncQueueHttpTimeoutMs),
+    extractJobLeaseMinutes: toInt(process.env.EXTRACT_JOB_LEASE_MINUTES, merged.extractJobLeaseMinutes),
     storePath: process.env.STORE_PATH ?? merged.storePath,
     outputDirs: {
       raw: process.env.OUTPUT_RAW_DIR ?? merged.outputDirs.raw,

@@ -1,5 +1,5 @@
 import { DocumentDiscoveredItem, DownloadResult, ExtractionResult } from "../types";
-import { PipelineStore, RawFileItem, RevalidationItem, StoreStats } from "./types";
+import { ClaimedExtractJob, ExtractJobRecord, ExtractJobStatusRecord, PipelineStore, RawFileItem, RevalidationItem, StoreStats } from "./types";
 
 const ZERO_STATS: StoreStats = {
   totalDocuments: 0,
@@ -40,6 +40,22 @@ export class InMemoryStore implements PipelineStore {
   }
 
   async markRawMissing(_docId: string, _checkedAt: string): Promise<void> {
+    return;
+  }
+
+  async enqueueExtractJob(_job: ExtractJobRecord): Promise<void> {
+    return;
+  }
+
+  async claimPendingExtractJobs(_limit: number, _leaseUntil: string): Promise<ClaimedExtractJob[]> {
+    return [];
+  }
+
+  async getExtractJob(_jobId: string): Promise<ExtractJobStatusRecord | undefined> {
+    return undefined;
+  }
+
+  async completeExtractJob(_result: { jobId: string; status: "completed" | "failed"; finishedAt: string; error?: string; resultRef?: string }): Promise<void> {
     return;
   }
 

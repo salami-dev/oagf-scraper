@@ -147,7 +147,7 @@ export async function runDownloader(deps: DownloaderDeps): Promise<DownloadSumma
     }
   }
 
-  if (config.changeDetectionMode === "head") {
+  if (config.changeDetectionMode === "head" || config.changeDetectionMode === "conditional_get") {
     const checkedBeforeIso = new Date(Date.now() - config.revalidateAfterDays * 24 * 60 * 60 * 1000).toISOString();
     const candidates = await store.listRevalidationCandidates(2000, checkedBeforeIso);
     for (const item of candidates) {
@@ -156,9 +156,20 @@ export async function runDownloader(deps: DownloaderDeps): Promise<DownloadSumma
         const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
         let response: Response;
         try {
+          const headers: Record<string, string> = { "user-agent": config.userAgent };
+          const method = config.changeDetectionMode === "conditional_get" ? "GET" : "HEAD";
+          if (config.changeDetectionMode === "conditional_get") {
+            if (item.etag) {
+              headers["If-None-Match"] = item.etag;
+            }
+            if (item.lastModified) {
+              headers["If-Modified-Since"] = item.lastModified;
+            }
+          }
+
           response = await fetchFn(item.url, {
-            method: "HEAD",
-            headers: { "user-agent": config.userAgent },
+            method,
+            headers,
             dispatcher: getFetchDispatcher(config.ignoreHttpsErrors),
             signal: controller.signal,
             redirect: "follow",
@@ -169,12 +180,17 @@ export async function runDownloader(deps: DownloaderDeps): Promise<DownloadSumma
 
         const remoteEtag = response.headers.get("etag") ?? undefined;
         const remoteLastModified = response.headers.get("last-modified") ?? undefined;
-        const changed =
+        const unchanged304 = config.changeDetectionMode === "conditional_get" && response.status === 304;
+        const changedByValidators =
           (Boolean(item.etag) && Boolean(remoteEtag) && item.etag !== remoteEtag) ||
-          (Boolean(item.lastModified) && Boolean(remoteLastModified) && item.lastModified !== remoteLastModified) ||
-          response.status === 404;
+          (Boolean(item.lastModified) && Boolean(remoteLastModified) && item.lastModified !== remoteLastModified);
+        const changedByStatus =
+          response.status === 404 || (config.changeDetectionMode === "conditional_get" && response.status === 200);
+        const changed = changedByValidators || changedByStatus;
 
-        if (changed) {
+        if (unchanged304) {
+          await store.markRemoteUnchanged(item.docId, new Date().toISOString(), remoteEtag, remoteLastModified);
+        } else if (changed) {
           await store.markRemoteChanged(item.docId, new Date().toISOString(), remoteEtag, remoteLastModified);
           logger.info("download_revalidation_changed", { docId: item.docId, url: item.url });
         } else {
